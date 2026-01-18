@@ -13,5 +13,11 @@ export * from './network';
 export {fetchFile, resetDeviceCache, configureRetryStrategy} from './nfs';
 export type {FetchProgress} from './nfs';
 
+// Passive mode (pcap-based monitoring without announcing a VCDJ). Lets us
+// observe Pro DJ Link traffic and pull NFS metadata without ever appearing
+// on the device roster - sidesteps the 6-CDJ player cap. Cherry-picked
+// from chrisle/alphatheta-connect.
+export * from './passive';
+
 // Types are exported last to avoid overwriting values with type-only exports
 export * from './types';
