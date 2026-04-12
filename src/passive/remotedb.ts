@@ -223,6 +223,17 @@ export class PassiveRemoteDatabase {
         args: {trackId},
       });
 
+      // File path is not available for streaming tracks (Beatport, etc.)
+      try {
+        track.filePath = await conn.query({
+          queryDescriptor,
+          query: Query.GetTrackInfo,
+          args: {trackId},
+        });
+      } catch {
+        // No-op, streaming tracks don't have a local file
+      }
+
       return track;
     } catch (err) {
       // Connection may have been closed, remove it
