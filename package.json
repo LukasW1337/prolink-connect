@@ -52,7 +52,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "preversion": "pnpm lint; pnpm test",
-    "prepare": "tsdown"
+    "prepare": "test -d src && tsdown || true"
   },
   "dependencies": {
     "@sentry/node": "^6.4.1",
