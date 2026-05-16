@@ -1,4 +1,4 @@
-import * as XDR from 'js-xdr';
+import XDR from 'js-xdr';
 
 /**
  * A xdr type to read the rest of the data in the buffer — all remaining bytes
