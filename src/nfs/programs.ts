@@ -7,9 +7,13 @@ import {flattenLinkedList} from './utils';
 import {mount, nfs, portmap} from './xdr';
 
 /**
- * How many bytes of a file should we read at once.
+ * How many bytes of a file to read per NFS READ call. NFSv2 (this module
+ * speaks version 2) caps a single READ at NFS_MAXDATA = 8192 bytes; using
+ * the max cuts the number of sequential round-trips ~4x versus the old
+ * 2048. Matters because export.pdb is multi-MB and each read is one
+ * blocking UDP transaction.
  */
-const READ_SIZE = 2048;
+const READ_SIZE = 8192;
 
 interface Program {
   id: number;

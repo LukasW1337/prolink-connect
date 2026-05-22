@@ -39,8 +39,21 @@ const slotMountMapping = {
 
 /**
  * The module-level retry configuration for newly created RpcConnections.
+ *
+ * Bounded on purpose: an unanswered NFS call now rejects within ~13s
+ * worst-case rather than stalling for minutes. (promise-retry's own
+ * default is 10 retries with unbounded exponential backoff - given the
+ * per-slot hydration Mutex in LocalDatabase, one stuck read could block
+ * every metadata lookup for that slot for ~17 minutes.) Callers can still
+ * override via configureRetryStrategy.
  */
-let retryConfig: RetryConfig = {};
+let retryConfig: RetryConfig = {
+  transactionTimeout: 2000,
+  retries: 4,
+  factor: 2,
+  minTimeout: 250,
+  maxTimeout: 1500,
+};
 
 /**
  * This module maintains a singleton cached list of player addresses -> active

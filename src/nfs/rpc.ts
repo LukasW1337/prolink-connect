@@ -1,12 +1,12 @@
 import {Mutex} from 'async-mutex';
 import promiseRetry from 'promise-retry';
-import {timeout, TimeoutError} from 'promise-timeout';
+import {TimeoutError} from 'promise-timeout';
 import type {OperationOptions} from 'retry';
 
 import type {Socket} from 'node:dgram';
 import dgram from 'node:dgram';
 
-import {udpClose, udpRead, udpSend} from 'src/utils/udp';
+import {udpClose, udpSend} from 'src/utils/udp';
 
 import {rpc} from './xdr';
 
@@ -67,7 +67,7 @@ export class RpcConnection {
   // to determine if the socket is still open.
   connected = true;
 
-  setupRequest({program, version, procedure, data}: Omit<RpcCall, 'port'>) {
+  setupRequest({program, version, procedure, data}: Omit<RpcCall, 'port'>, xid: number) {
     const auth = new rpc.Auth({
       flavor: 1,
       body: rpcAuthMessage.toXDR(),
@@ -89,11 +89,53 @@ export class RpcConnection {
     });
 
     const packet = new rpc.Packet({
-      xid: this.xid,
+      xid,
       message: rpc.Message.request(request),
     });
 
     return packet.toXDR();
+  }
+
+  /**
+   * Wait for a UDP datagram whose RPC xid matches `xid`, rejecting with a
+   * TimeoutError after `timeoutMs`.
+   *
+   * The xid is the leading 4 bytes of every RPC reply (see the `Packet`
+   * XDR struct - `xid` is a leading uint). Matching on it is what lets a
+   * late reply to a previous, already-timed-out transaction be ignored
+   * instead of being mis-attributed to the call currently waiting. Without
+   * this, a single dropped packet on a lossy link desynced responses from
+   * requests and surfaced as "RPC did not successfully return data" or
+   * garbled metadata. Both the listener and the timer are always torn down
+   * on the way out, so a retry can never leak a `message` handler onto the
+   * shared socket.
+   */
+  private readResponse(xid: number, timeoutMs: number): Promise<Buffer> {
+    return new Promise<Buffer>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.socket.off('message', onMessage);
+        this.socket.off('error', onError);
+      };
+      const onMessage = (msg: Buffer) => {
+        // Ignore datagrams too short to carry an xid, and replies belonging
+        // to a different transaction - keep listening for ours.
+        if (msg.length >= 4 && msg.readUInt32BE(0) === xid) {
+          cleanup();
+          resolve(msg);
+        }
+      };
+      const onError = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new TimeoutError());
+      }, timeoutMs);
+      this.socket.on('message', onMessage);
+      this.socket.once('error', onError);
+    });
   }
 
   /**
@@ -103,27 +145,29 @@ export class RpcConnection {
    * retried with the retry configuration.
    */
   async call({port, ...call}: RpcCall) {
-    this.xid++;
+    // Each transaction gets a fresh 32-bit xid (wrapping) so readResponse
+    // can tell our reply apart from a stale one. Allocated before any await.
+    const xid = this.xid;
+    this.xid = this.xid >= 0xffffffff ? 1 : this.xid + 1;
 
-    const callData = this.setupRequest(call);
-
-    // Function to execute the transaction
-    const executeCall = async () => {
-      await udpSend(this.socket, callData, 0, callData.length, port, this.address);
-      return udpRead(this.socket);
-    };
+    const callData = this.setupRequest(call, xid);
 
     const {transactionTimeout, ...retryConfig} = this.retryConfig;
+    const timeoutMs = transactionTimeout ?? 1000;
 
-    // Function to execute the transaction, with timeout if the transaction
-    // does not resolve after RESPONSE_RETRY_TIMEOUT.
-    const executeWithTimeout = () => timeout(executeCall(), transactionTimeout ?? 1000);
+    // One transaction attempt: (re)send the identical request and wait for
+    // the matching reply. Retransmitting with the same xid is correct RPC
+    // behavior - if the original reply was merely slow it still matches.
+    const executeCall = async () => {
+      await udpSend(this.socket, callData, 0, callData.length, port, this.address);
+      return this.readResponse(xid, timeoutMs);
+    };
 
-    // Function to execute the transaction, with retries if the transaction times out.
+    // Function to execute the transaction, with retries if it times out.
     const executeWithRetry = () =>
       promiseRetry(retryConfig, async retry => {
         try {
-          return await executeWithTimeout();
+          return await executeCall();
         } catch (err) {
           if (err instanceof TimeoutError) {
             retry(err);
