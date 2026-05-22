@@ -54,7 +54,9 @@ export async function viaRemote(remote: RemoteDatabase, opts: Required<Options>)
     span,
   });
 
-  return {waveformHd} as Waveforms;
+  // The colored preview (PWV4) lives in the .EXT analysis file and has no
+  // remotedb query; it's only available via the local-database path.
+  return {waveformHd, waveformColorPreview: null} as Waveforms;
 }
 
 export async function viaLocal(
@@ -75,5 +77,8 @@ export async function viaLocal(
 
   const anlz = await loadAnlz(track, 'EXT', anlzLoader({device, slot: trackSlot}));
 
-  return {waveformHd: anlz.waveformHd} as Waveforms;
+  return {
+    waveformHd: anlz.waveformHd,
+    waveformColorPreview: anlz.waveformColorPreview ?? null,
+  } as Waveforms;
 }

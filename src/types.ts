@@ -201,6 +201,21 @@ export type WaveformDetailed = WaveformSegment[];
 export type WaveformHD = WaveformHDSegment[];
 
 /**
+ * The colored preview waveform (rekordbox "PWV4" section in the .EXT file):
+ * a fixed-width overview of the ENTIRE track (typically ~1200 columns),
+ * unlike WaveformHD which is scroll-resolution (150 columns per second).
+ * This is the right size to render a whole-track overview on a now-playing
+ * tile.
+ *
+ * Exposed as the raw section payload - `len_entries` columns, 6 bytes per
+ * column. The 6-byte-per-column color encoding is intentionally left
+ * undecoded (neither rekordbox-parser nor this library decode it); see
+ * https://djl-analysis.deepsymmetry.org/djl-analysis/track-metadata.html#color-preview-waveform
+ * for the channel layout if you need to render it.
+ */
+export type WaveformColorPreview = Buffer;
+
+/**
  * The result of looking up track waveforms
  */
 export interface Waveforms {
@@ -209,7 +224,12 @@ export interface Waveforms {
    */
   waveformHd: WaveformHD;
 
-  // TODO: Add other waveform types
+  /**
+   * The fixed-width colored overview of the whole track (PWV4). Null when
+   * the track's .EXT analysis file doesn't carry it. Raw bytes - see
+   * {@link WaveformColorPreview}.
+   */
+  waveformColorPreview: WaveformColorPreview | null;
 }
 
 /**

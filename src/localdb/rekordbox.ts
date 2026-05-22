@@ -24,7 +24,13 @@ import type {
 import type {MetadataORM} from 'src/localdb/orm';
 import {Table} from 'src/localdb/orm';
 import {makeCueLoopEntry} from 'src/localdb/utils';
-import type {BeatGrid, CueAndLoop, HotcueButton, WaveformHD} from 'src/types';
+import type {
+  BeatGrid,
+  CueAndLoop,
+  HotcueButton,
+  WaveformColorPreview,
+  WaveformHD,
+} from 'src/types';
 import {convertWaveformHDData} from 'src/utils/converters';
 
 // NOTE: Kaitai doesn't currently have a good typescript exporter, so we will
@@ -60,6 +66,11 @@ interface AnlzResponseEXT {
    * HD Waveform information
    */
   waveformHd: WaveformHD | null;
+  /**
+   * Raw colored preview waveform (PWV4): a fixed-width overview of the whole
+   * track. See {@link WaveformColorPreview}.
+   */
+  waveformColorPreview: WaveformColorPreview | null;
 }
 
 interface AnlzResponse {
@@ -150,6 +161,10 @@ export async function loadAnlz<T extends keyof AnlzResponse>(
       resultExt.waveformHd = makeWaveformHd(section);
       continue;
     }
+    if (section.fourcc === SectionTags.WAVE_COLOR_PREVIEW) {
+      resultExt.waveformColorPreview = makeWaveformColorPreview(section);
+      continue;
+    }
 
     // TODO: The following sections haven't yet been extracted into the local
     //       database.
@@ -158,7 +173,6 @@ export async function loadAnlz<T extends keyof AnlzResponse>(
     // [SectionTags.SONG_STRUCTURE]: null,     <- In the EXT file
     // [SectionTags.WAVE_PREVIEW]: null,
     // [SectionTags.WAVE_SCROLL]: null,
-    // [SectionTags.WAVE_COLOR_PREVIEW]: null, <- In the EXT file
   }
 
   return result;
@@ -394,6 +408,14 @@ function makeCueAndLoop(data: any) {
  */
 function makeWaveformHd(data: any) {
   return convertWaveformHDData(Buffer.from(data.body.entries));
+}
+
+/**
+ * Pull the raw colored preview waveform (PWV4) bytes out of the ANLZ
+ * section. Left undecoded - see {@link WaveformColorPreview}.
+ */
+function makeWaveformColorPreview(data: any): WaveformColorPreview {
+  return Buffer.from(data.body.entries);
 }
 
 const {PageType} = RekordboxPdb;
