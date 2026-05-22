@@ -93,14 +93,20 @@ export async function bringOnline(config?: NetworkConfig) {
   Sentry.setTag('connectionId', randomUUID());
   const tx = Sentry.startTransaction({name: 'bringOnline'});
 
+  // reuseAddr lets a fresh process rebind the well-known ProLink ports
+  // immediately even if the previous instance's socket hasn't fully been
+  // released by the kernel yet. Without it, a quick restart (systemd
+  // restart, our own auto-update) can fail the bind with EADDRINUSE, which
+  // rejects bringOnline, kills the agent, and flaps in a restart loop.
+
   // Socket used to listen for devices on the network
-  const announceSocket = dgram.createSocket('udp4');
+  const announceSocket = dgram.createSocket({type: 'udp4', reuseAddr: true});
 
   // Socket used to listen for beat timing information
-  const beatSocket = dgram.createSocket('udp4');
+  const beatSocket = dgram.createSocket({type: 'udp4', reuseAddr: true});
 
   // Socket used to listen for status packets
-  const statusSocket = dgram.createSocket('udp4');
+  const statusSocket = dgram.createSocket({type: 'udp4', reuseAddr: true});
 
   try {
     await udpBind(announceSocket, ANNOUNCE_PORT, '0.0.0.0');
