@@ -14,7 +14,7 @@ import LocalDatabase from 'src/localdb';
 import {MixstatusProcessor} from 'src/mixstatus';
 import RemoteDatabase from 'src/remotedb';
 import StatusEmitter from 'src/status';
-import type {Device} from 'src/types';
+import type {Device, DeviceID, MediaSlot} from 'src/types';
 import {NetworkState} from 'src/types';
 import {getMatchingInterface} from 'src/utils';
 import {udpBind, udpClose} from 'src/utils/udp';
@@ -149,6 +149,9 @@ export class ProlinkNetwork {
   #config: null | NetworkConfig;
   #connection: null | ConnectionService;
   #mixstatus: null | MixstatusProcessor;
+  /** The virtual CDJ we pose as; set on connect(). Used as the host device
+   * for active media-slot queries. */
+  #vcdj: null | Device;
 
   /**
    * @internal
@@ -171,6 +174,7 @@ export class ProlinkNetwork {
 
     this.#connection = null;
     this.#mixstatus = null;
+    this.#vcdj = null;
 
     // We always start online when constructing the network
     this.#state = NetworkState.Online;
@@ -250,6 +254,7 @@ export class ProlinkNetwork {
 
     // Create VCDJ for the interface's broadcast address
     const vcdj = getVirtualCDJ(this.#config.iface, this.#config.vcdjId);
+    this.#vcdj = vcdj;
 
     // Start announcing
     const announcer = new Announcer(vcdj, this.#announceSocket, this.deviceManager);
@@ -293,6 +298,35 @@ export class ProlinkNetwork {
       udpClose(this.#statusSocket),
       udpClose(this.#beatSocket),
     ]);
+  }
+
+  /**
+   * Actively request the media-slot info for a device's slot, instead of
+   * waiting for the CDJ's periodic broadcast. Useful right after connect or
+   * when we notice a deck playing off a slot we have no cached media for.
+   *
+   * The resolved value is also re-emitted on `statusEmitter`'s `mediaSlot`
+   * event, so listeners that cache broadcasts will pick it up too. Returns
+   * null if the device isn't on the roster. Requires connect() first.
+   *
+   * Note: the underlying StatusEmitter resolves on the next `mediaSlot`
+   * event, which may be a different device's broadcast - rely on the
+   * `mediaSlot` listener (keyed by deviceId/slot) rather than this return
+   * value when you need the info for a specific slot.
+   */
+  async queryMediaSlot(deviceId: DeviceID, slot: MediaSlot) {
+    if (this.#vcdj === null) {
+      throw new Error('Cannot query media slot before connect()');
+    }
+    const device = this.#deviceManager.devices.get(deviceId);
+    if (device === undefined) {
+      return null;
+    }
+    return this.#statusEmitter.queryMediaSlot({
+      hostDevice: this.#vcdj,
+      device,
+      slot,
+    });
   }
 
   /**
