@@ -188,10 +188,27 @@ export class ProlinkNetwork {
    */
   async autoconfigFromPeers() {
     const tx = Sentry.startTransaction({name: 'autoConfigure'});
-    // wait for first device to appear on the network
-    const firstDevice = await new Promise<Device>(resolve =>
-      this.#deviceManager.once('connected', resolve),
-    );
+
+    // A device may already be in the roster: the DeviceManager starts
+    // listening the moment bringOnline() binds the announce socket, so if a
+    // CDJ was already powered on and announcing before this process booted,
+    // its `connected` event fired before we got a chance to subscribe and
+    // will NOT fire again (DeviceManager only emits `connected` the first
+    // time it sees a device). Waiting on `once('connected')` in that case
+    // hangs forever ("waiting for peers" with a CDJ right there). So adopt
+    // an already-known device; only wait if the roster is still empty.
+    //
+    // The roster read and the `once` registration below run synchronously
+    // with no await between them, so an announce can't slip in and be
+    // missed in the gap.
+    const knownDevice = this.#deviceManager.devices.values().next().value as
+      | Device
+      | undefined;
+    const firstDevice =
+      knownDevice ??
+      (await new Promise<Device>(resolve =>
+        this.#deviceManager.once('connected', resolve),
+      ));
     const iface = getMatchingInterface(firstDevice.ip);
 
     // Log addr and iface addr / mask for cases where it may have matched the
