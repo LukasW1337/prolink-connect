@@ -258,6 +258,39 @@ const ensureDate = (date: Date) =>
   date instanceof Date && !Number.isNaN(date.valueOf()) ? date : undefined;
 
 /**
+ * Decode a DeviceSqlString field's text, repairing the UTF-8-as-Latin-1
+ * mojibake rekordbox-parser produces for the "ascii" string bodies.
+ *
+ * rekordbox stores UTF-8 in the short/long "ascii" DeviceSQL string types,
+ * but rekordbox-parser decodes those byte-per-char (Latin-1), so e.g. "Så"
+ * arrives as "SaÌŠ" and "længe" as "lÃ¦nge". The UTF-16LE body type is
+ * already decoded correctly and is left untouched. We fix it here, in the
+ * fork's own code, rather than in rekordbox-parser: the Pi agent
+ * npm-installs the unpatched parser from the registry, but it runs this
+ * vendored lib/, so the repair has to live on this side to reach the agent.
+ *
+ * Guard: reversing the bytes (latin1 -> utf8) and keeping the result only
+ * if it's valid UTF-8 (no U+FFFD). An already-correct or pure-ASCII string
+ * fails the guard and is returned unchanged, so this can't corrupt good
+ * data and is idempotent.
+ */
+function decodeText(field: any): string | undefined {
+  const body = field?.body;
+  if (body == null) return undefined;
+  const text: unknown = body.text;
+  if (typeof text !== 'string' || text.length === 0) {
+    return text as string | undefined;
+  }
+  const Pdb = RekordboxPdb as any;
+  const isAscii =
+    body instanceof Pdb.DeviceSqlShortAscii ||
+    body instanceof Pdb.DeviceSqlLongAscii;
+  if (!isAscii) return text;
+  const repaired = Buffer.from(text, 'latin1').toString('utf8');
+  return repaired.includes('�') ? text : repaired;
+}
+
+/**
  * Utility to create a hydrator that hydrates the provided entity with the id
  * and name properties from the row.
  */
@@ -266,18 +299,18 @@ const makeIdNameHydrator =
   (row: any) =>
     ({
       id: row.id,
-      name: row.name.body.text ?? '',
+      name: decodeText(row.name) ?? '',
     }) as T;
 
 /**
  * Translates a pdb track row entry to a {@link Track} entity.
  */
 function createTrack(trackRow: any) {
-  const analyzePath: string | undefined = trackRow.analyzePath.body.text;
+  const analyzePath: string | undefined = decodeText(trackRow.analyzePath);
 
   const track: Track<EntityFK.WithFKs> = {
     id: trackRow.id,
-    title: trackRow.title.body.text,
+    title: decodeText(trackRow.title),
     trackNumber: trackRow.trackNumber,
     discNumber: trackRow.discNumber,
     duration: trackRow.duration,
@@ -288,14 +321,14 @@ function createTrack(trackRow: any) {
     playCount: trackRow.playCount,
     year: trackRow.year,
     rating: trackRow.rating,
-    mixName: trackRow.mixName.body.text,
-    comment: trackRow.comment.body.text,
+    mixName: decodeText(trackRow.mixName),
+    comment: decodeText(trackRow.comment),
     autoloadHotcues: trackRow.autoloadHotcues.body.text === 'ON',
     kuvoPublic: trackRow.kuvoPublic.body.text === 'ON',
-    filePath: trackRow.filePath.body.text,
-    fileName: trackRow.filename.body.text,
+    filePath: decodeText(trackRow.filePath),
+    fileName: decodeText(trackRow.filename),
     fileSize: trackRow.fileSize,
-    releaseDate: trackRow.releaseDate.body.text,
+    releaseDate: decodeText(trackRow.releaseDate),
     analyzeDate: ensureDate(new Date(trackRow.analyzeDate.body.text)),
     dateAdded: ensureDate(new Date(trackRow.dateAdded.body.text)),
 
@@ -339,7 +372,7 @@ function createTrack(trackRow: any) {
 function createPlaylist(playlistRow: any) {
   const playlist: Playlist = {
     id: playlistRow.id,
-    name: playlistRow.name.body.text,
+    name: decodeText(playlistRow.name),
     isFolder: playlistRow.rawIsFolder !== 0,
     parentId: playlistRow.parentId || null,
   };
@@ -367,7 +400,7 @@ function createPlaylistEntry(playlistTrackRow: any) {
 function createArtworkEntry(artworkRow: any) {
   const art: Artwork = {
     id: artworkRow.id,
-    path: artworkRow.path.body.text,
+    path: decodeText(artworkRow.path),
   };
 
   return art;
