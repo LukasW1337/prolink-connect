@@ -249,11 +249,28 @@ class LocalDatabase {
       throw new Error('Cannot create database from devices that are not CDJs');
     }
 
-    const media = await this.#statusEmitter.queryMediaSlot({
-      hostDevice: this.#hostDevice,
-      device,
-      slot,
-    });
+    let media: MediaSlotInfo;
+    try {
+      media = await this.#statusEmitter.queryMediaSlot({
+        hostDevice: this.#hostDevice,
+        device,
+        slot,
+      });
+    } catch (err) {
+      // The media query timed out or failed. queryMediaSlot is only used to
+      // compute the media identity so we can detect a swapped USB/SD. If we've
+      // already hydrated a database for this exact device+slot, reuse it - a
+      // flaky media query must not drop metadata we already hold in memory.
+      // (This is the difference between "logs the track" and "drops the play"
+      // when the player is briefly slow to answer slot queries.)
+      const existing = this.#dbs.find(
+        db => db.media.deviceId === deviceId && db.media.slot === slot,
+      );
+      if (existing !== undefined) {
+        return existing.orm;
+      }
+      throw err;
+    }
 
     if (media.tracksType !== TrackType.RB) {
       return null;
