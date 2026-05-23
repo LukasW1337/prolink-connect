@@ -290,18 +290,26 @@ class LocalDatabase {
 
   /**
    * Preload the databases for all connected devices.
+   *
+   * Each (device, slot) is settled independently: a slot that doesn't answer -
+   * an empty SD, a player with no media, a busy/slow device whose media query
+   * times out - must NOT fail the whole preload. With `Promise.all`, one such
+   * rejection aborted preloading for EVERY player (and, paired with the
+   * agent's re-run-on-connect, caused the pdb to be re-downloaded in a loop).
+   * `allSettled` lets the players that do have rekordbox media hydrate while
+   * the dead slots are quietly skipped.
    */
   async preload() {
-    const loaders = [...this.#deviceManager.devices.values()]
-      .filter(device => device.type === DeviceType.CDJ)
-      .map(device =>
-        Promise.all([
-          this.get(device.id, MediaSlot.USB),
-          this.get(device.id, MediaSlot.SD),
-        ]),
-      );
+    const loaders: Array<Promise<unknown>> = [];
+    for (const device of this.#deviceManager.devices.values()) {
+      if (device.type !== DeviceType.CDJ) {
+        continue;
+      }
+      loaders.push(this.get(device.id, MediaSlot.USB));
+      loaders.push(this.get(device.id, MediaSlot.SD));
+    }
 
-    await Promise.all(loaders);
+    await Promise.allSettled(loaders);
   }
 }
 
