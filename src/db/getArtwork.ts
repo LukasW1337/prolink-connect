@@ -78,10 +78,22 @@ export async function viaLocal(
     return null;
   }
 
+  const artworkPath = track.artwork.path;
+
   try {
-    return fetchFile({device, slot: trackSlot, path: track.artwork.path});
+    // NOTE: must `await` inside the try - the previous `return fetchFile(...)`
+    // returned the promise unawaited, so this catch never actually fired and
+    // the rejection propagated to the caller raw.
+    return await fetchFile({device, slot: trackSlot, path: artworkPath});
   } catch (error) {
     Sentry.captureException(error);
-    return null;
+    // Re-throw with the FULL stored path. The bare NFS error only names the
+    // final path segment (e.g. "a23.jpg"), which hides whether the directory
+    // resolved and just the file is missing, or the whole path is wrong
+    // (e.g. a bare filename looked up at the media root). Callers treat
+    // artwork as optional and swallow this, so it only surfaces in logs.
+    throw new Error(
+      `artwork lookup failed (path="${artworkPath}"): ${(error as Error).message}`,
+    );
   }
 }
