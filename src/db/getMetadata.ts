@@ -1,4 +1,5 @@
 import type {Span} from '@sentry/tracing';
+import {timeout} from 'promise-timeout';
 
 import type LocalDatabase from 'src/localdb';
 import {loadAnlz} from 'src/localdb/rekordbox';
@@ -92,10 +93,32 @@ export async function viaLocal(
     return null;
   }
 
-  const anlz = await loadAnlz(track, 'DAT', anlzLoader({device, slot: trackSlot}));
-
-  track.beatGrid = anlz.beatGrid;
-  track.cueAndLoops = anlz.cueAndLoops;
+  // The SQLite row from the hydrated database already carries everything most
+  // callers need (title, artist, album, genre, key, tempo, ...). beatGrid and
+  // cueAndLoops come from a SEPARATE per-track NFS fetch of the `.DAT` analyze
+  // file, which can hang or fail independently of the (already-loaded)
+  // database - a single stuck file read here would otherwise block the entire
+  // metadata lookup and, upstream, get the play dropped. Treat the ANLZ load
+  // as best-effort with a hard timeout: return the database metadata with no
+  // beat grid / cues rather than failing the whole lookup.
+  try {
+    const anlz = await timeout(
+      loadAnlz(track, 'DAT', anlzLoader({device, slot: trackSlot})),
+      ANLZ_LOAD_TIMEOUT_MS,
+    );
+    track.beatGrid = anlz.beatGrid;
+    track.cueAndLoops = anlz.cueAndLoops;
+  } catch {
+    // ANLZ unavailable (NFS slow/down, file missing, or parse error). The
+    // background fetch, if still running, resolves harmlessly and is ignored.
+  }
 
   return track;
 }
+
+/**
+ * Hard cap on the per-track ANLZ (`.DAT`) NFS fetch in {@link viaLocal}. The
+ * beat grid / cues it yields are non-essential next to the database row, so we
+ * never let a slow or wedged analyze-file read hold up a metadata lookup.
+ */
+const ANLZ_LOAD_TIMEOUT_MS = 5000;
