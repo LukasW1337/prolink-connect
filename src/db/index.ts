@@ -1,11 +1,13 @@
 import * as Sentry from '@sentry/node';
 import {SpanStatus} from '@sentry/tracing';
+import type {Span} from '@sentry/tracing';
 
 import type DeviceManager from 'src/devices';
 import type {Track} from 'src/entities';
 import type LocalDatabase from 'src/localdb';
 import type RemoteDatabase from 'src/remotedb';
-import type {Device, PlaylistContents, Waveforms} from 'src/types';
+import {fetchFile} from 'src/nfs';
+import type {Device, DeviceID, PlaylistContents, Waveforms} from 'src/types';
 import {DeviceType, MediaSlot, TrackType} from 'src/types';
 import {getSlotName, getTrackTypeName} from 'src/utils';
 
@@ -243,6 +245,59 @@ class Database {
     tx.finish();
 
     return contents;
+  }
+
+  /**
+   * Fetch the raw bytes of an arbitrary file from a device's media slot over
+   * NFS, by its rekordbox-stored path (e.g. the audio file behind a track, so
+   * a consumer can compute a Chromaprint/AcoustID fingerprint). This is the
+   * same NFS transport getArtwork uses, just with a caller-supplied path
+   * instead of the artwork path.
+   *
+   * Local (USB/SD) only: there is no file-transfer channel for a track served
+   * over the remote database (a rekordbox laptop), so RB/remote slots return
+   * null rather than throwing. Returns null when the device isn't on the
+   * network. Large files (a full track is several MB) stream over the venue
+   * LAN, not any uplink - bound the work by fetching once per unique file.
+   */
+  async getFile(opts: {
+    deviceId: DeviceID;
+    slot: MediaSlot;
+    path: string;
+    span?: Span;
+  }): Promise<Buffer | null> {
+    const {deviceId, slot, path, span} = opts;
+
+    const tx = span
+      ? span.startChild({op: 'dbGetFile'})
+      : Sentry.startTransaction({name: 'dbGetFile'});
+
+    tx.setTag('deviceId', deviceId.toString());
+    tx.setTag('slot', getSlotName(slot));
+
+    const device = await this.#deviceManager.getDeviceEnsured(deviceId);
+    if (device === null) {
+      tx.finish();
+      return null;
+    }
+
+    // NFS export names only exist for USB / SD / RB-root slots. Anything else
+    // (CD, empty, or a track served via remotedb) has no file to fetch.
+    if (slot !== MediaSlot.USB && slot !== MediaSlot.SD && slot !== MediaSlot.RB) {
+      tx.setStatus(SpanStatus.Unavailable);
+      tx.finish();
+      return null;
+    }
+
+    try {
+      const file = await fetchFile({device, slot, path, span: tx});
+      tx.finish();
+      return file;
+    } catch (err) {
+      Sentry.captureException(err);
+      tx.finish();
+      throw err;
+    }
   }
 }
 
