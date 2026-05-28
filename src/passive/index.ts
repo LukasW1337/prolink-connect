@@ -1,5 +1,6 @@
 import {MixstatusProcessor} from 'src/mixstatus';
 
+import {PassiveDatabase} from './db';
 import {PassiveDeviceManager} from './devices';
 import {PassiveLocalDatabase} from './localdb';
 import {PcapAdapter} from './pcap-adapter';
@@ -14,6 +15,7 @@ export {PassiveStatusEmitter} from './status';
 export {PassivePositionEmitter} from './position';
 export {PassiveLocalDatabase} from './localdb';
 export {PassiveRemoteDatabase} from './remotedb';
+export {PassiveDatabase} from './db';
 export {findAlphaThetaInterface, getArpCacheForInterface} from './alphatheta';
 export type {AlphaThetaInterface} from './alphatheta';
 
@@ -56,6 +58,7 @@ export class PassiveProlinkNetwork {
   #positionEmitter: PassivePositionEmitter;
   #localdb: PassiveLocalDatabase;
   #remotedb: PassiveRemoteDatabase | null = null;
+  #db: PassiveDatabase | null = null;
   #mixstatus: MixstatusProcessor | null = null;
 
   constructor(config: PassiveNetworkConfig) {
@@ -163,6 +166,32 @@ export class PassiveProlinkNetwork {
       this.#remotedb = new PassiveRemoteDatabase(this.#deviceManager);
     }
     return this.#remotedb;
+  }
+
+  /**
+   * Active-Database-compatible facade. Routes getMetadata / getWaveforms
+   * / getFile / cdjSupportsRemotedb between the passive localdb (NFS .pdb)
+   * and the passive remotedb (TCP dbserver), mirroring the active
+   * Database surface so callers that read `network.db` keep working in
+   * passive mode without code changes.
+   */
+  get db(): PassiveDatabase {
+    if (this.#db === null) {
+      this.#db = new PassiveDatabase(
+        this.#deviceManager,
+        this.#localdb,
+        this.remotedb
+      );
+    }
+    return this.#db;
+  }
+
+  /**
+   * Alias for stop() so consumers that call `network.disconnect()` (the
+   * active-mode lifecycle name) keep working in passive mode.
+   */
+  async disconnect() {
+    this.stop();
   }
 
   /**
