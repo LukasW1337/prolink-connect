@@ -34,6 +34,20 @@ export interface PassiveNetworkConfig {
    * @default 10000
    */
   deviceTimeout?: number;
+  /**
+   * Device ID claimed by PassiveRemoteDatabase in its Introduce handshake
+   * when querying a CDJ's dbserver over TCP. Pioneer authorizes metadata
+   * queries only from IDs 1-6, so this must stay in range. At venues where
+   * all six CDJ-3000 slots are occupied the default 5 will collide with the
+   * real CDJ at slot 5; pick an unused in-range ID (typically 4) instead.
+   *
+   * Only matters for unanalyzed / AudioCD / Rekordbox-laptop tracks, since
+   * analyzed CDJ-USB tracks are fetched via NFS and don't go through the
+   * Introduce step.
+   *
+   * @default 5
+   */
+  remotedbVirtualDeviceId?: number;
 }
 
 /**
@@ -60,12 +74,15 @@ export class PassiveProlinkNetwork {
   #remotedb: PassiveRemoteDatabase | null = null;
   #db: PassiveDatabase | null = null;
   #mixstatus: MixstatusProcessor | null = null;
+  #remotedbVirtualDeviceId: number;
 
   constructor(config: PassiveNetworkConfig) {
     this.#adapter = new PcapAdapter({
       iface: config.iface,
       bufferSize: config.bufferSize,
     });
+
+    this.#remotedbVirtualDeviceId = config.remotedbVirtualDeviceId ?? 5;
 
     // Only pass defined config values to avoid overwriting defaults with undefined
     this.#deviceManager = new PassiveDeviceManager(
@@ -163,7 +180,10 @@ export class PassiveProlinkNetwork {
    */
   get remotedb() {
     if (this.#remotedb === null) {
-      this.#remotedb = new PassiveRemoteDatabase(this.#deviceManager);
+      this.#remotedb = new PassiveRemoteDatabase(
+        this.#deviceManager,
+        this.#remotedbVirtualDeviceId
+      );
     }
     return this.#remotedb;
   }
