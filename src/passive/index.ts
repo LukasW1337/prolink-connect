@@ -7,17 +7,15 @@ import {PassivePositionEmitter} from './position';
 import {PassiveRemoteDatabase} from './remotedb';
 import {PassiveStatusEmitter} from './status';
 
-export {PcapAdapter, PcapAdapterConfig, PacketInfo} from './pcap-adapter';
+export {PcapAdapter} from './pcap-adapter';
+export type {PcapAdapterConfig, PacketInfo} from './pcap-adapter';
 export {PassiveDeviceManager} from './devices';
 export {PassiveStatusEmitter} from './status';
 export {PassivePositionEmitter} from './position';
 export {PassiveLocalDatabase} from './localdb';
 export {PassiveRemoteDatabase} from './remotedb';
-export {
-  findAlphaThetaInterface,
-  getArpCacheForInterface,
-  AlphaThetaInterface,
-} from './alphatheta';
+export {findAlphaThetaInterface, getArpCacheForInterface} from './alphatheta';
+export type {AlphaThetaInterface} from './alphatheta';
 
 export interface PassiveNetworkConfig {
   /**
