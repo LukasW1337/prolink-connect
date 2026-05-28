@@ -18,6 +18,7 @@
 
 import {timeout} from 'promise-timeout';
 
+import type {Track} from 'src/entities';
 import {loadAnlz} from 'src/localdb/rekordbox';
 import {fetchFile, FetchProgress} from 'src/nfs';
 import {Device, DeviceID, DeviceType, MediaSlot, TrackType, Waveforms} from 'src/types';
@@ -50,10 +51,22 @@ export interface GetMetadataOptions {
   span?: unknown;
 }
 
-export interface GetWaveformsOptions extends GetMetadataOptions {}
+export interface GetWaveformsOptions {
+  deviceId: DeviceID;
+  trackSlot: MediaSlot;
+  trackType: TrackType;
+  /**
+   * Already-resolved Track row, same as the active Database.getWaveforms.
+   * The waveform fetch needs `track.analyzePath` to compute the .EXT path,
+   * so the caller passes the metadata it already looked up rather than
+   * making us re-resolve it here.
+   */
+  track: Track;
+  span?: unknown;
+}
 
 export interface GetFileOptions {
-  device: Device;
+  deviceId: DeviceID;
   slot: MediaSlot;
   path: string;
   span?: unknown;
@@ -172,7 +185,7 @@ export class PassiveDatabase {
   }
 
   async getWaveforms(opts: GetWaveformsOptions): Promise<Waveforms | null> {
-    const {deviceId, trackSlot, trackType, trackId} = opts;
+    const {deviceId, trackSlot, trackType, track} = opts;
 
     const device = this.#deviceManager.devices.get(deviceId);
     if (!device) {
@@ -183,16 +196,6 @@ export class PassiveDatabase {
 
     if (strategy === LookupStrategy.Local) {
       if (trackSlot !== MediaSlot.USB && trackSlot !== MediaSlot.SD) {
-        return null;
-      }
-
-      const orm = await this.#localdb.get(deviceId, trackSlot);
-      if (orm === null) {
-        return null;
-      }
-
-      const track = orm.findTrack(trackId);
-      if (track === null || track === undefined) {
         return null;
       }
 
@@ -216,11 +219,23 @@ export class PassiveDatabase {
     return null;
   }
 
-  async getFile(opts: GetFileOptions): Promise<Buffer> {
-    const {device, slot, path, onProgress} = opts;
+  async getFile(opts: GetFileOptions): Promise<Buffer | null> {
+    const {deviceId, slot, path, onProgress} = opts;
+
+    const device = this.#deviceManager.devices.get(deviceId);
+    if (!device) {
+      return null;
+    }
+
+    // NFS export names only exist for USB / SD / RB-root slots. Anything else
+    // (CD, empty, or a track served via remotedb) has no file to fetch.
+    if (slot !== MediaSlot.USB && slot !== MediaSlot.SD && slot !== MediaSlot.RB) {
+      return null;
+    }
+
     return fetchFile({
       device,
-      slot: slot as MediaSlot.USB | MediaSlot.SD,
+      slot,
       path,
       span: Telemetry.startTransaction({name: 'passiveGetFile'}),
       onProgress,
