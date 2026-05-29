@@ -180,7 +180,13 @@ export class PcapAdapter {
         const udpResult = decoders.UDP(this.#buffer, ipResult.offset);
         const dstPort = udpResult.info.dstport;
         const udpPayloadOffset = udpResult.offset;
-        const udpPayloadLen = udpResult.info.length - 8; // UDP header is 8 bytes
+        // cap's UDP decoder ALREADY subtracts the 8-byte UDP header from the
+        // length field (Decoders.js: `length = readUInt16BE(...) - 8`), so
+        // info.length IS the payload length. Subtracting 8 again truncated every
+        // captured packet by 8 bytes, which pushed 54-byte announces under the
+        // 53-byte short-format threshold and made the parser mislabel devices
+        // (e.g. our rekordbox-lighting id as a "mixer"). Use info.length as-is.
+        const udpPayloadLen = udpResult.info.length;
 
         if (udpPayloadLen <= 0) {
           return;

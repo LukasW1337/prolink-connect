@@ -44,14 +44,18 @@ function deviceFromPacketWithInfo(packet: Buffer, info: PacketInfo): Device | nu
     // Device ID at 0x24
     deviceId = packet[0x24];
 
-    // Short-format packets don't have device type at the usual offset.
-    // Use device ID heuristic: 1-6 are CDJ slots, 17 is Rekordbox, 33+ are mixer
+    // Short-format packets don't carry the device-type byte at 0x34, so we
+    // infer from the device number: 1-6 are CDJ player slots, 0x21 (33) is the
+    // DJM mixer, and everything else in the high range is rekordbox-class
+    // (laptops at 0x11+, mobile at 0x29+, and our rekordbox-lighting waker in
+    // 0x13-0x27). The old rule only mapped exactly 17 to rekordbox and bucketed
+    // the rest as mixer, which mislabeled our lighting device.
     if (deviceId >= 1 && deviceId <= 6) {
       deviceType = DeviceType.CDJ;
-    } else if (deviceId === 17) {
-      deviceType = DeviceType.Rekordbox;
-    } else {
+    } else if (deviceId === 0x21) {
       deviceType = DeviceType.Mixer;
+    } else {
+      deviceType = DeviceType.Rekordbox;
     }
 
     // MAC address at 0x26 (6 bytes)
