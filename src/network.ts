@@ -277,21 +277,28 @@ export class ProlinkNetwork {
   }
 
   /**
-   * Disconnect from the network
+   * Disconnect from the network.
+   *
+   * Safe to call in ANY state, including a network that was brought online but
+   * never configured/connected (e.g. autoconfigFromPeers timed out on an empty
+   * roster). bringOnline() binds all three UDP sockets immediately, so we must
+   * always release them here or the fds leak and a subsequent bind can fail
+   * with EADDRINUSE. The connection-dependent cleanup below is null-guarded, so
+   * it no-ops when we never connected.
    */
   disconnect() {
-    if (this.#config === null) {
-      throw new Error(connectErrorHelp);
-    }
-
-    // Stop announcing ourself
+    // Stop announcing ourself (only present once connected).
     this.#connection?.announcer.stop();
 
-    // Disconnect devices from the remote and local databases
+    // Disconnect devices from the remote and local databases (no-op if we
+    // never connected - the getters return null until then).
     for (const device of this.deviceManager.devices.values()) {
       this.remotedb?.disconnectFromDevice(device);
       this.localdb?.disconnectForDevice(device);
     }
+
+    this.#connection = null;
+    this.#state = NetworkState.Online;
 
     return Promise.all([
       udpClose(this.#announceSocket),
