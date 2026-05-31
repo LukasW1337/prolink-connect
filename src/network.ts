@@ -15,7 +15,7 @@ import {MixstatusProcessor} from 'src/mixstatus';
 import RemoteDatabase from 'src/remotedb';
 import StatusEmitter from 'src/status';
 import type {Device, DeviceID, MediaSlot} from 'src/types';
-import {NetworkState} from 'src/types';
+import {DeviceType, NetworkState} from 'src/types';
 import {getMatchingInterface} from 'src/utils';
 import {udpBind, udpClose} from 'src/utils/udp';
 import {Announcer, chooseMonitorNumber, getVirtualCDJ} from 'src/virtualcdj';
@@ -61,6 +61,12 @@ export interface NetworkConfig {
    * restriction.
    */
   vcdjId: number;
+  /**
+   * Custom device name (nickname) we announce on the network. Max 20 ASCII
+   * bytes; anything longer is truncated. Defaults to the library KUVO name
+   * when omitted.
+   */
+  vcdjName?: string;
 }
 
 interface ConnectionService {
@@ -72,7 +78,7 @@ interface ConnectionService {
 }
 
 interface ConstructOpts {
-  config?: NetworkConfig;
+  config?: Partial<NetworkConfig>;
   announceSocket: Socket;
   beatSocket: Socket;
   statusSocket: Socket;
@@ -103,7 +109,7 @@ export type ConnectedProlinkNetwork = ProlinkNetwork & {
  *
  * This is the primary entrypoint for connecting to the prolink network.
  */
-export async function bringOnline(config?: NetworkConfig) {
+export async function bringOnline(config?: Partial<NetworkConfig>) {
   Sentry.setTag('connectionId', randomUUID());
   const tx = Sentry.startTransaction({name: 'bringOnline'});
 
@@ -178,7 +184,11 @@ export class ProlinkNetwork {
     deviceManager,
     statusEmitter,
   }: ConstructOpts) {
-    this.#config = config ?? null;
+    // A seed config may be partial (e.g. just {vcdjName}); iface/vcdjId are
+    // filled in by autoconfigFromPeers()/configure() before connect() reads
+    // them. Cast so the partial seed is accepted without rippling optionality
+    // through connect().
+    this.#config = (config as NetworkConfig | undefined) ?? null;
 
     this.#announceSocket = announceSocket;
     this.#beatSocket = beatSocket;
@@ -282,8 +292,14 @@ export class ProlinkNetwork {
           .join(',')}]`,
     );
 
-    // Create the virtual device for the interface's address
-    const vcdj = getVirtualCDJ(this.#config.iface, number);
+    // Create the virtual device for the interface's address. Honor a custom
+    // nickname from the config; getVirtualCDJ falls back to the KUVO name.
+    const vcdj = getVirtualCDJ(
+      this.#config.iface,
+      number,
+      DeviceType.KUVO,
+      this.#config.vcdjName,
+    );
     this.#vcdj = vcdj;
 
     // Let the DeviceManager filter our own announce echo by address - matching

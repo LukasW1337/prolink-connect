@@ -11,7 +11,9 @@ import {MediaSlot, TrackType} from 'src/types';
  */
 export function buildName(device: Device): Uint8Array {
   const name = new Uint8Array(20);
-  name.set(Buffer.from(device.name, 'ascii'));
+  // The wire field is 20 bytes; truncate longer names so a custom nickname
+  // can't overflow (Uint8Array.set throws when the source is too long).
+  name.set(Buffer.from(device.name, 'ascii').subarray(0, 20));
 
   return name;
 }

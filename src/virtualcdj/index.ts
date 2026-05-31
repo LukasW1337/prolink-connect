@@ -110,7 +110,9 @@ export function makeStatusPacket(device: Device): Uint8Array {
   //  - 0x7C: 04 byte firmware string
 
   b.set(PROLINK_HEADER, 0x0b);
-  b.set(Buffer.from(device.name, 'ascii'), 0x0b);
+  // 20-byte name field (0x0b..0x1e); truncate so a long nickname can't run into
+  // the device-ID byte at 0x21.
+  b.set(Buffer.from(device.name, 'ascii').subarray(0, 20), 0x0b);
   b.set(new Uint8Array([device.id]), 0x21);
   b.set(new Uint8Array([device.id]), 0x24);
   b.set(Buffer.from(VIRTUAL_CDJ_FIRMWARE, 'ascii'), 0x7c);
