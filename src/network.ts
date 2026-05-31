@@ -277,7 +277,7 @@ export class ProlinkNetwork {
     // eslint-disable-next-line no-console
     console.log(
       `[prolink] announcing as device number 0x${number.toString(16)} ` +
-        `(avoiding 0x19, the CDJ-3000's embedded gateway). Seen: [${[...usedNumbers]
+        `(monitor range, above the gateway 0x19). Seen: [${[...usedNumbers]
           .map(n => '0x' + n.toString(16))
           .join(',')}]`,
     );

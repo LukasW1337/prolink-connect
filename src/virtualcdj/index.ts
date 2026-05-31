@@ -6,7 +6,6 @@ import type {NetworkInterfaceInfoIPv4} from 'node:os';
 import {
   ANNOUNCE_INTERVAL,
   ANNOUNCE_PORT,
-  KUVO_DEFAULT_NUMBER,
   MONITOR_NUMBER_MAX,
   MONITOR_NUMBER_MIN,
   PROLINK_HEADER,
@@ -41,22 +40,15 @@ export const getVirtualCDJ = (
 });
 
 /**
- * Pick a device number in the monitor range that no device we've heard from is
- * using - and crucially NOT the canonical gateway number (KUVO_DEFAULT_NUMBER,
- * 0x19).
+ * Pick a device number in the monitor range (MONITOR_NUMBER_MIN..MAX) that no
+ * device we've heard from is using.
  *
- * A CDJ-3000 EMBEDS the NXS-GW gateway role at 0x19, so on essentially every
- * modern booth that number is already taken - even before we've heard it
- * announce (it may not be in the roster yet when connect() runs). If we pick
- * 0x19 we announce as a DUPLICATE of the deck's own built-in gateway; the CDJ
- * treats that as a device-number conflict with itself and will NOT stream
- * status to us (and we then flap our number when we notice the collision).
- * Confirmed empirically: the kuvo-probe wakes decks with a fixed distinct
- * number (e.g. 0x1b) but not when it prefers 0x19.
- *
- * So: honor an explicit, in-range, free `preferred`; otherwise take the first
- * free monitor number that ISN'T 0x19; fall back to 0x19 only if the whole
- * range is otherwise occupied.
+ * The range itself encodes the hard-won constraint: it starts ABOVE the gateway
+ * number (0x19) because a CDJ-3000 only streams status to a monitor numbered
+ * above its own embedded gateway - at/below it (e.g. 0x13) the deck recognises
+ * us but won't stream status - and stays in the low end of that band to keep
+ * the status compact. So any free slot in the range is a valid streaming
+ * number; honor an explicit free `preferred` first, else take the first free.
  */
 export function chooseMonitorNumber(used: Set<DeviceID>, preferred?: number): DeviceID {
   if (
@@ -67,10 +59,12 @@ export function chooseMonitorNumber(used: Set<DeviceID>, preferred?: number): De
   ) {
     return preferred;
   }
+  // The range already starts above the gateway number, so any free slot here is
+  // a valid status-streaming number.
   for (let n = MONITOR_NUMBER_MIN; n <= MONITOR_NUMBER_MAX; n++) {
-    if (n !== KUVO_DEFAULT_NUMBER && !used.has(n)) return n;
+    if (!used.has(n)) return n;
   }
-  return KUVO_DEFAULT_NUMBER; // whole range occupied; last resort
+  return MONITOR_NUMBER_MIN; // range exhausted; least-bad, still above the gateway
 }
 
 /**

@@ -7,19 +7,24 @@
 export const DEFAULT_VCDJ_ID = 0x07;
 
 /**
- * Device-number range Pioneer uses for non-player / monitor devices (rekordbox,
- * lighting, KUVO gateway). A KUVO virtual device self-assigns from here so it
- * never consumes a 1-6 player slot.
- */
-export const MONITOR_NUMBER_MIN = 0x13;
-export const MONITOR_NUMBER_MAX = 0x27;
-
-/**
- * The number a real NXS-GW/KUVO self-assigns. We prefer it when free, but a
- * CDJ-3000 embeds the gateway role at this number, so the picker falls back to
- * another free monitor number when it's taken.
+ * The number a real NXS-GW / CDJ-3000 embedded gateway uses. Critical: a
+ * CDJ-3000 only streams its status (0x0a) to a monitor whose number is ABOVE
+ * this. At or below it, the deck ignores us for status (confirmed on hardware:
+ * 0x13 got the media handshake but no status; numbers > 0x19 stream).
  */
 export const KUVO_DEFAULT_NUMBER = 0x19;
+
+/**
+ * Device-number range for our KUVO virtual device. Both bounds matter,
+ * empirically:
+ *  - MIN must be ABOVE the gateway number (0x19) or decks won't stream status.
+ *  - staying well under ~0x32 keeps the deck emitting the compact ~292-byte
+ *    status; higher numbers flip it into the verbose ~1100-byte status (more
+ *    traffic for no gain). 0x1a..0x27 sits safely in the compact, above-gateway
+ *    band and never consumes a 1-6 player slot.
+ */
+export const MONITOR_NUMBER_MIN = 0x1a; // 26 - one above the gateway
+export const MONITOR_NUMBER_MAX = 0x27; // 39 - below the verbose-status threshold
 
 /**
  * The port on which devices on the prolink network announce themselves.
@@ -56,11 +61,12 @@ export const PROLINK_HEADER = Uint8Array.of(
 export const VIRTUAL_CDJ_NAME = 'prolink-typescript';
 
 /**
- * Name announced when posing as a KUVO gateway: the real product name, so we
- * register on the network exactly like an NXS-GW. (Our own announce echo is
- * filtered from the roster by address, not name, so this is safe.)
+ * Name announced when posing as a KUVO gateway. The name is cosmetic - decks
+ * key their behaviour off the device TYPE and NUMBER, not the name - so we use
+ * our own identifiable name. (Our announce echo is filtered from the roster by
+ * address, not name, so this is safe even next to a real NXS-GW.)
  */
-export const VIRTUAL_KUVO_NAME = 'NXS-GW';
+export const VIRTUAL_KUVO_NAME = 'mt-tracker';
 
 /**
  * VirtualCDJFirmware is a string indicating the firmware version reported with
