@@ -271,7 +271,13 @@ export class Announcer {
     const next = chooseMonitorNumber(used, this.#vcdj.id);
     if (next === this.#vcdj.id) return; // nothing else free; hold our ground
 
+    const prev = this.#vcdj.id;
     this.#vcdj.id = next; // network holds this by reference, so queries follow
     this.#announcePacket = makeAnnouncePacket(this.#vcdj);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[prolink] device number 0x${prev.toString(16)} claimed by another device ` +
+        `(${kind === 0x08 ? 'conflict/defend' : 'keep-alive'}); yielded to 0x${next.toString(16)}`,
+    );
   };
 }
