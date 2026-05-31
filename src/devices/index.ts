@@ -77,6 +77,13 @@ class DeviceManager {
    * The EventEmitter which will be used to trigger device lifecycle events
    */
   #emitter: Emitter = new EventEmitter();
+  /**
+   * Our own virtual device's address, set once we connect. Announcements from
+   * this address are our own echo and must not enter the roster. Filtering by
+   * address (rather than the old hardcoded name) lets us announce under any
+   * name, e.g. as a KUVO gateway named "mt-agent".
+   */
+  #selfAddress: null | string = null;
 
   constructor(announceSocket: Socket, config?: Config) {
     this.#config = {...defaultConfig, ...config};
@@ -129,10 +136,24 @@ class DeviceManager {
     this.#config = {...this.#config, ...config};
   }
 
+  /**
+   * Register our own virtual device's address so its announce echo is filtered
+   * out of the roster. Called on connect().
+   */
+  setSelf(address: string) {
+    this.#selfAddress = address;
+  }
+
   #handleAnnounce = (message: Buffer) => {
     const device = deviceFromPacket(message);
 
     if (device === null) {
+      return;
+    }
+
+    // Ignore our own announcement: by address (our connected virtual device)
+    // or by the legacy default name (before connect() sets the address).
+    if (this.#selfAddress !== null && device.ip.address === this.#selfAddress) {
       return;
     }
 

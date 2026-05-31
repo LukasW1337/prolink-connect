@@ -6,6 +6,9 @@ import type {NetworkInterfaceInfoIPv4} from 'node:os';
 import {
   ANNOUNCE_INTERVAL,
   ANNOUNCE_PORT,
+  KUVO_DEFAULT_NUMBER,
+  MONITOR_NUMBER_MAX,
+  MONITOR_NUMBER_MIN,
   PROLINK_HEADER,
   VIRTUAL_CDJ_FIRMWARE,
   VIRTUAL_CDJ_NAME,
@@ -16,15 +19,44 @@ import {DeviceType} from 'src/types';
 import {buildName} from 'src/utils';
 
 /**
- * Constructs a virtual CDJ Device.
+ * Constructs the virtual device we announce as. Defaults to the KUVO (NXS-GW
+ * gateway) class: a passive monitor that wakes decks via presence without
+ * claiming a player slot or advertising a library. Pass a different `type` /
+ * `name` to override (e.g. announce as a CDJ for remotedb metadata access).
  */
-export const getVirtualCDJ = (iface: NetworkInterfaceInfoIPv4, id: DeviceID): Device => ({
+export const getVirtualCDJ = (
+  iface: NetworkInterfaceInfoIPv4,
+  id: DeviceID,
+  type: DeviceType = DeviceType.KUVO,
+  name: string = VIRTUAL_CDJ_NAME,
+): Device => ({
   id,
-  name: VIRTUAL_CDJ_NAME,
-  type: DeviceType.CDJ,
+  name,
+  type,
   ip: new ip.Address4(iface.address),
   macAddr: new Uint8Array(iface.mac.split(':').map(s => Number.parseInt(s, 16))),
 });
+
+/**
+ * Pick a device number in the monitor range that no device we've heard from is
+ * using. Prefers `preferred` when it's a free in-range number, else the
+ * canonical KUVO number, else the first free slot. Mirrors how a real gateway
+ * self-assigns and what the lighting-waker did via startup avoidance.
+ */
+export function chooseMonitorNumber(used: Set<DeviceID>, preferred?: number): DeviceID {
+  const want =
+    preferred !== undefined &&
+    preferred >= MONITOR_NUMBER_MIN &&
+    preferred <= MONITOR_NUMBER_MAX
+      ? preferred
+      : KUVO_DEFAULT_NUMBER;
+
+  if (!used.has(want)) return want;
+  for (let n = MONITOR_NUMBER_MIN; n <= MONITOR_NUMBER_MAX; n++) {
+    if (!used.has(n)) return n;
+  }
+  return want; // every monitor number is taken; keep our preference
+}
 
 /**
  * Returns a mostly empty-state status packet. This is currently used to report
@@ -84,9 +116,16 @@ export function makeStatusPacket(device: Device): Uint8Array {
 export function makeAnnouncePacket(deviceToAnnounce: Device): Uint8Array {
   const d = deviceToAnnounce;
 
-  // unknown padding bytes
-  const unknown1 = [0x01, 0x02];
-  const unknown2 = [0x01, 0x00, 0x00, 0x00];
+  // A real NXS-GW/KUVO keep-alive differs from a CDJ's in four bytes (verified
+  // against a live capture): the two "unknown" fields, and the dual device-type
+  // bytes. The KUVO carries 0x02 at 0x25 but 0x08 at 0x34, whereas a CDJ uses
+  // its single type for both. Emitting the faithful bytes keeps Pioneer gear
+  // (which is strict about packet shape) from rejecting our presence.
+  const isKuvo = d.type === DeviceType.KUVO;
+  const unknown1 = isKuvo ? [0x01, 0x01] : [0x01, 0x02];
+  const unknown2 = isKuvo ? [0x00, 0x00, 0x00, 0x00] : [0x01, 0x00, 0x00, 0x00];
+  const typeAt25 = isKuvo ? 0x02 : d.type;
+  const typeAt34 = d.type;
 
   // The packet blow is constructed in the following format:
   //
@@ -111,11 +150,11 @@ export function makeAnnouncePacket(deviceToAnnounce: Device): Uint8Array {
     ...unknown1,
     ...[0x00, 0x36],
     ...[d.id],
-    ...[d.type],
+    ...[typeAt25],
     ...d.macAddr,
     ...d.ip.toArray(),
     ...unknown2,
-    ...[d.type],
+    ...[typeAt34],
     ...[0x00],
   ];
   /* oxlint-enable no-useless-spread */
@@ -146,17 +185,24 @@ export class Announcer {
    */
   #intervalHandle?: NodeJS.Timeout;
 
+  /**
+   * The cached announce packet. Rebuilt whenever we yield to a new number.
+   */
+  #announcePacket: Uint8Array;
+
   constructor(vcdj: Device, announceSocket: Socket, deviceManager: DeviceManager) {
     this.#vcdj = vcdj;
     this.#announceSocket = announceSocket;
     this.#deviceManager = deviceManager;
+    this.#announcePacket = makeAnnouncePacket(vcdj);
   }
 
   start() {
-    const announcePacket = makeAnnouncePacket(this.#vcdj);
+    // Watch for another device claiming our number so we can yield (below).
+    this.#announceSocket.on('message', this.#handleConflict);
 
     const announceToDevice = (device: Device) =>
-      this.#announceSocket.send(announcePacket, ANNOUNCE_PORT, device.ip.address);
+      this.#announceSocket.send(this.#announcePacket, ANNOUNCE_PORT, device.ip.address);
 
     this.#intervalHandle = setInterval(
       () => [...this.#deviceManager.devices.values()].forEach(announceToDevice),
@@ -168,5 +214,36 @@ export class Announcer {
     if (this.#intervalHandle !== undefined) {
       clearInterval(this.#intervalHandle);
     }
+    this.#announceSocket.off('message', this.#handleConflict);
   }
+
+  /**
+   * Yield our device number if another device claims it. As a passive KUVO
+   * monitor we do NOT run the CDJ claim/defend handshake, so the correct
+   * behaviour on a collision is to step aside: pick a new free monitor number
+   * and rebuild our announce packet. Triggered by either a 0x08 conflict/defend
+   * packet or a foreign 0x06 keep-alive carrying our number (both put the
+   * contested number at 0x24).
+   */
+  #handleConflict = (msg: Buffer) => {
+    const kind = msg[0x0a];
+    if (kind !== 0x06 && kind !== 0x08) return;
+    if (msg[0x24] !== this.#vcdj.id) return;
+
+    // Ignore our own keep-alive echo (its payload carries our IP at 0x2c).
+    if (kind === 0x06) {
+      const ip = `${msg[0x2c]}.${msg[0x2d]}.${msg[0x2e]}.${msg[0x2f]}`;
+      if (ip === this.#vcdj.ip.address) return;
+    }
+
+    const used = new Set<DeviceID>(
+      [...this.#deviceManager.devices.values()].map(d => d.id),
+    );
+    used.add(this.#vcdj.id);
+    const next = chooseMonitorNumber(used, this.#vcdj.id);
+    if (next === this.#vcdj.id) return; // nothing else free; hold our ground
+
+    this.#vcdj.id = next; // network holds this by reference, so queries follow
+    this.#announcePacket = makeAnnouncePacket(this.#vcdj);
+  };
 }

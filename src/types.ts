@@ -25,12 +25,19 @@ export type {ConnectedProlinkNetwork, NetworkConfig, ProlinkNetwork} from './net
 export type {FetchProgress} from './nfs';
 
 /**
- * Known device types on the network
+ * Known device types on the network.
+ *
+ * The type byte (keep-alive offset 0x34) classifies a device. KUVO is the
+ * NXS-GW gateway class: a passive monitor that announces presence, consumes no
+ * player slot, and is never browsed as a library. We pose as this because it
+ * wakes decks via presence without the player/sync-peer behaviour of a CDJ or
+ * the phantom-library behaviour of rekordbox.
  */
 export enum DeviceType {
   CDJ = 0x01,
   Mixer = 0x03,
   Rekordbox = 0x04,
+  KUVO = 0x08,
 }
 
 /**

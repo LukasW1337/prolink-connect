@@ -7,6 +7,21 @@
 export const DEFAULT_VCDJ_ID = 0x07;
 
 /**
+ * Device-number range Pioneer uses for non-player / monitor devices (rekordbox,
+ * lighting, KUVO gateway). A KUVO virtual device self-assigns from here so it
+ * never consumes a 1-6 player slot.
+ */
+export const MONITOR_NUMBER_MIN = 0x13;
+export const MONITOR_NUMBER_MAX = 0x27;
+
+/**
+ * The number a real NXS-GW/KUVO self-assigns. We prefer it when free, but a
+ * CDJ-3000 embeds the gateway role at this number, so the picker falls back to
+ * another free monitor number when it's taken.
+ */
+export const KUVO_DEFAULT_NUMBER = 0x19;
+
+/**
  * The port on which devices on the prolink network announce themselves.
  */
 export const ANNOUNCE_PORT = 50000;

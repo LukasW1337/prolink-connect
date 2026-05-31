@@ -18,7 +18,7 @@ import type {Device, DeviceID, MediaSlot} from 'src/types';
 import {NetworkState} from 'src/types';
 import {getMatchingInterface} from 'src/utils';
 import {udpBind, udpClose} from 'src/utils/udp';
-import {Announcer, getVirtualCDJ} from 'src/virtualcdj';
+import {Announcer, chooseMonitorNumber, getVirtualCDJ} from 'src/virtualcdj';
 
 const connectErrorHelp =
   'Network must be configured. Try using `autoconfigFromPeers` or `configure`';
@@ -252,9 +252,22 @@ export class ProlinkNetwork {
 
     const tx = Sentry.startTransaction({name: 'connect'});
 
-    // Create VCDJ for the interface's broadcast address
-    const vcdj = getVirtualCDJ(this.#config.iface, this.#config.vcdjId);
+    // Pick a collision-free monitor-range number from whoever we've already
+    // heard announce. We default to announcing as a KUVO gateway, which never
+    // claims a 1-6 player slot; the Announcer also yields at runtime if our
+    // number later conflicts. An explicit in-range vcdjId is honored when free.
+    const usedNumbers = new Set(
+      [...this.#deviceManager.devices.values()].map(d => d.id),
+    );
+    const number = chooseMonitorNumber(usedNumbers, this.#config.vcdjId);
+
+    // Create the virtual device for the interface's address
+    const vcdj = getVirtualCDJ(this.#config.iface, number);
     this.#vcdj = vcdj;
+
+    // Let the DeviceManager filter our own announce echo by address - matching
+    // the old hardcoded name no longer works once we announce as a custom name.
+    this.#deviceManager.setSelf(vcdj.ip.address);
 
     // Start announcing
     const announcer = new Announcer(vcdj, this.#announceSocket, this.deviceManager);
