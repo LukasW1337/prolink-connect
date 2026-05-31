@@ -23,6 +23,20 @@ import {Announcer, chooseMonitorNumber, getVirtualCDJ} from 'src/virtualcdj';
 const connectErrorHelp =
   'Network must be configured. Try using `autoconfigFromPeers` or `configure`';
 
+/**
+ * Compute the IPv4 subnet broadcast for an address/netmask (e.g. 169.254.99.99
+ * + 255.255.0.0 -> 169.254.255.255). Falls back to the limited broadcast when
+ * the inputs aren't well-formed dotted-quads.
+ */
+function subnetBroadcast(address: string, netmask: string): string {
+  const a = address.split('.').map(Number);
+  const m = netmask.split('.').map(Number);
+  if (a.length !== 4 || m.length !== 4 || [...a, ...m].some(n => Number.isNaN(n))) {
+    return '255.255.255.255';
+  }
+  return a.map((o, i) => (o & m[i]!) | (~m[i]! & 0xff)).join('.');
+}
+
 export interface NetworkConfig {
   /**
    * The network interface to listen for devices on the network over
@@ -269,8 +283,20 @@ export class ProlinkNetwork {
     // the old hardcoded name no longer works once we announce as a custom name.
     this.#deviceManager.setSelf(vcdj.ip.address);
 
+    // Real Pioneer gear BROADCASTS its keep-alive; CDJs only treat us as present
+    // (and stream status) when they see a broadcast announce. Compute the subnet
+    // broadcast from the interface and enable SO_BROADCAST on the socket.
+    const {address, netmask} = this.#config.iface;
+    const broadcastAddress = subnetBroadcast(address, netmask);
+    this.#announceSocket.setBroadcast(true);
+
     // Start announcing
-    const announcer = new Announcer(vcdj, this.#announceSocket, this.deviceManager);
+    const announcer = new Announcer(
+      vcdj,
+      this.#announceSocket,
+      this.deviceManager,
+      broadcastAddress,
+    );
     announcer.start();
 
     // Create remote and local databases

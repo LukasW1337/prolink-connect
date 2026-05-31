@@ -192,25 +192,38 @@ export class Announcer {
    * The cached announce packet. Rebuilt whenever we yield to a new number.
    */
   #announcePacket: Uint8Array;
+  /**
+   * Subnet broadcast address we announce to (e.g. 169.254.255.255). Real
+   * Pioneer devices BROADCAST their keep-alive; CDJs only treat us as present
+   * (and stream status) when they see a broadcast announce, not a unicast one.
+   */
+  #broadcastAddress: string;
 
-  constructor(vcdj: Device, announceSocket: Socket, deviceManager: DeviceManager) {
+  constructor(
+    vcdj: Device,
+    announceSocket: Socket,
+    deviceManager: DeviceManager,
+    broadcastAddress = '255.255.255.255',
+  ) {
     this.#vcdj = vcdj;
     this.#announceSocket = announceSocket;
     this.#deviceManager = deviceManager;
     this.#announcePacket = makeAnnouncePacket(vcdj);
+    this.#broadcastAddress = broadcastAddress;
   }
 
   start() {
     // Watch for another device claiming our number so we can yield (below).
     this.#announceSocket.on('message', this.#handleConflict);
 
-    const announceToDevice = (device: Device) =>
-      this.#announceSocket.send(this.#announcePacket, ANNOUNCE_PORT, device.ip.address);
+    // Broadcast our keep-alive to the whole segment, exactly like real gear.
+    // Unicasting it to each known device (the old behaviour) does NOT make CDJs
+    // start streaming status - the broadcast presence is what wakes them.
+    const announce = () =>
+      this.#announceSocket.send(this.#announcePacket, ANNOUNCE_PORT, this.#broadcastAddress);
 
-    this.#intervalHandle = setInterval(
-      () => [...this.#deviceManager.devices.values()].forEach(announceToDevice),
-      ANNOUNCE_INTERVAL,
-    );
+    announce(); // don't wait a full interval to establish presence
+    this.#intervalHandle = setInterval(announce, ANNOUNCE_INTERVAL);
   }
 
   stop() {
