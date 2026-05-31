@@ -274,6 +274,13 @@ export class ProlinkNetwork {
       [...this.#deviceManager.devices.values()].map(d => d.id),
     );
     const number = chooseMonitorNumber(usedNumbers, this.#config.vcdjId);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[prolink] announcing as device number 0x${number.toString(16)} ` +
+        `(avoiding 0x19, the CDJ-3000's embedded gateway). Seen: [${[...usedNumbers]
+          .map(n => '0x' + n.toString(16))
+          .join(',')}]`,
+    );
 
     // Create the virtual device for the interface's address
     const vcdj = getVirtualCDJ(this.#config.iface, number);

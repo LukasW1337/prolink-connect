@@ -42,23 +42,35 @@ export const getVirtualCDJ = (
 
 /**
  * Pick a device number in the monitor range that no device we've heard from is
- * using. Prefers `preferred` when it's a free in-range number, else the
- * canonical KUVO number, else the first free slot. Mirrors how a real gateway
- * self-assigns and what the lighting-waker did via startup avoidance.
+ * using - and crucially NOT the canonical gateway number (KUVO_DEFAULT_NUMBER,
+ * 0x19).
+ *
+ * A CDJ-3000 EMBEDS the NXS-GW gateway role at 0x19, so on essentially every
+ * modern booth that number is already taken - even before we've heard it
+ * announce (it may not be in the roster yet when connect() runs). If we pick
+ * 0x19 we announce as a DUPLICATE of the deck's own built-in gateway; the CDJ
+ * treats that as a device-number conflict with itself and will NOT stream
+ * status to us (and we then flap our number when we notice the collision).
+ * Confirmed empirically: the kuvo-probe wakes decks with a fixed distinct
+ * number (e.g. 0x1b) but not when it prefers 0x19.
+ *
+ * So: honor an explicit, in-range, free `preferred`; otherwise take the first
+ * free monitor number that ISN'T 0x19; fall back to 0x19 only if the whole
+ * range is otherwise occupied.
  */
 export function chooseMonitorNumber(used: Set<DeviceID>, preferred?: number): DeviceID {
-  const want =
+  if (
     preferred !== undefined &&
     preferred >= MONITOR_NUMBER_MIN &&
-    preferred <= MONITOR_NUMBER_MAX
-      ? preferred
-      : KUVO_DEFAULT_NUMBER;
-
-  if (!used.has(want)) return want;
-  for (let n = MONITOR_NUMBER_MIN; n <= MONITOR_NUMBER_MAX; n++) {
-    if (!used.has(n)) return n;
+    preferred <= MONITOR_NUMBER_MAX &&
+    !used.has(preferred)
+  ) {
+    return preferred;
   }
-  return want; // every monitor number is taken; keep our preference
+  for (let n = MONITOR_NUMBER_MIN; n <= MONITOR_NUMBER_MAX; n++) {
+    if (n !== KUVO_DEFAULT_NUMBER && !used.has(n)) return n;
+  }
+  return KUVO_DEFAULT_NUMBER; // whole range occupied; last resort
 }
 
 /**
