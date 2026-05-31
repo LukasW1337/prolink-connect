@@ -125,15 +125,20 @@ export function makeStatusPacket(device: Device): Uint8Array {
 export function makeAnnouncePacket(deviceToAnnounce: Device): Uint8Array {
   const d = deviceToAnnounce;
 
-  // A real NXS-GW/KUVO keep-alive differs from a CDJ's in four bytes (verified
-  // against a live capture): the two "unknown" fields, and the dual device-type
-  // bytes. The KUVO carries 0x02 at 0x25 but 0x08 at 0x34, whereas a CDJ uses
-  // its single type for both. Emitting the faithful bytes keeps Pioneer gear
-  // (which is strict about packet shape) from rejecting our presence.
-  const isKuvo = d.type === DeviceType.KUVO;
-  const unknown1 = isKuvo ? [0x01, 0x01] : [0x01, 0x02];
-  const unknown2 = isKuvo ? [0x00, 0x00, 0x00, 0x00] : [0x01, 0x00, 0x00, 0x00];
-  const typeAt25 = isKuvo ? 0x02 : d.type;
+  // We announce a SELF-CONSISTENT keep-alive: 0x25 and 0x34 both carry the real
+  // device type, and the two "unknown" fields always use the CDJ values
+  // (0x21=02, 0x30=01). We keep type 0x08 (KUVO) and the above-gateway number -
+  // the bits that actually wake CDJs - but emit them the consistent way.
+  //
+  // We USED to replay the real NXS-GW shape byte-for-byte for KUVO (0x21=01,
+  // 0x25=02, 0x30=00 while 0x34=08) on the theory that strict Pioneer gear
+  // wanted the faithful bytes. It does the opposite: a DJM reads the 0x25=02 /
+  // 0x34=08 type contradiction as a malformed gateway and drops into an endless
+  // reconnect loop (proven with kuvo-probe - the consistent shape survives, the
+  // faithful one crashes the mixer).
+  const unknown1 = [0x01, 0x02];
+  const unknown2 = [0x01, 0x00, 0x00, 0x00];
+  const typeAt25 = d.type;
   const typeAt34 = d.type;
 
   // The packet blow is constructed in the following format:
