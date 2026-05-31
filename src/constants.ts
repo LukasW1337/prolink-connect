@@ -56,6 +56,13 @@ export const PROLINK_HEADER = Uint8Array.of(
 export const VIRTUAL_CDJ_NAME = 'prolink-typescript';
 
 /**
+ * Name announced when posing as a KUVO gateway: the real product name, so we
+ * register on the network exactly like an NXS-GW. (Our own announce echo is
+ * filtered from the roster by address, not name, so this is safe.)
+ */
+export const VIRTUAL_KUVO_NAME = 'NXS-GW';
+
+/**
  * VirtualCDJFirmware is a string indicating the firmware version reported with
  * status packets.
  */

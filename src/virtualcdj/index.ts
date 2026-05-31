@@ -10,9 +10,9 @@ import {
   MONITOR_NUMBER_MAX,
   MONITOR_NUMBER_MIN,
   PROLINK_HEADER,
-  STATUS_PORT,
   VIRTUAL_CDJ_FIRMWARE,
   VIRTUAL_CDJ_NAME,
+  VIRTUAL_KUVO_NAME,
 } from 'src/constants';
 import type DeviceManager from 'src/devices';
 import type {Device, DeviceID} from 'src/types';
@@ -29,10 +29,12 @@ export const getVirtualCDJ = (
   iface: NetworkInterfaceInfoIPv4,
   id: DeviceID,
   type: DeviceType = DeviceType.KUVO,
-  name: string = VIRTUAL_CDJ_NAME,
+  name?: string,
 ): Device => ({
   id,
-  name,
+  // Default the name to match the identity: a KUVO announces as "NXS-GW", any
+  // other pose uses the library's default name.
+  name: name ?? (type === DeviceType.KUVO ? VIRTUAL_KUVO_NAME : VIRTUAL_CDJ_NAME),
   type,
   ip: new ip.Address4(iface.address),
   macAddr: new Uint8Array(iface.mac.split(':').map(s => Number.parseInt(s, 16))),
@@ -164,31 +166,6 @@ export function makeAnnouncePacket(deviceToAnnounce: Device): Uint8Array {
 }
 
 /**
- * The 38-byte presence beacon a real NXS-GW/KUVO broadcasts on the status port
- * (50002) every ~2s, verbatim from a live capture. Unlike the keep-alive it
- * carries NO IP or MAC - just the device name (at 0x0b) and number (at 0x21).
- * We re-emit it so a CDJ that keys its status streaming off "a KUVO is present
- * on 50002" sees us the same way it sees the real gateway.
- */
-// oxfmt-ignore
-const KUVO_STATUS_TEMPLATE = Uint8Array.of(
-  0x51, 0x73, 0x70, 0x74, 0x31, 0x57, 0x6d, 0x4a, 0x4f, 0x4c, 0x40,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // name (20)
-  0x01, 0x01, 0x19, 0x00, 0x02, 0x01, 0x01,
-);
-
-/**
- * Build the KUVO status-port (0x40) beacon for a device: the template with the
- * device's name patched at 0x0b and its number at 0x21. No address fields.
- */
-export function makeKuvoStatusPacket(device: Device): Uint8Array {
-  const b = Uint8Array.from(KUVO_STATUS_TEMPLATE);
-  b.set(Buffer.from(device.name.slice(0, 20), 'ascii'), 0x0b);
-  b[0x21] = device.id;
-  return b;
-}
-
-/**
  * the announcer service is used to report our fake CDJ to the prolink network,
  * as if it was a real CDJ.
  */
@@ -215,44 +192,20 @@ export class Announcer {
    * The cached announce packet. Rebuilt whenever we yield to a new number.
    */
   #announcePacket: Uint8Array;
-  /**
-   * Socket bound to the status port (50002), used to also emit the KUVO 0x40
-   * presence beacon there. Optional - omitted, we just announce on 50000.
-   */
-  #statusSocket?: Socket;
-  /**
-   * The KUVO 0x40 status-port beacon, set only when posing as a KUVO. Rebuilt
-   * on a number yield, like the announce packet.
-   */
-  #statusPacket: Uint8Array | null;
 
-  constructor(
-    vcdj: Device,
-    announceSocket: Socket,
-    deviceManager: DeviceManager,
-    statusSocket?: Socket,
-  ) {
+  constructor(vcdj: Device, announceSocket: Socket, deviceManager: DeviceManager) {
     this.#vcdj = vcdj;
     this.#announceSocket = announceSocket;
     this.#deviceManager = deviceManager;
-    this.#statusSocket = statusSocket;
     this.#announcePacket = makeAnnouncePacket(vcdj);
-    this.#statusPacket =
-      vcdj.type === DeviceType.KUVO ? makeKuvoStatusPacket(vcdj) : null;
   }
 
   start() {
     // Watch for another device claiming our number so we can yield (below).
     this.#announceSocket.on('message', this.#handleConflict);
 
-    const announceToDevice = (device: Device) => {
+    const announceToDevice = (device: Device) =>
       this.#announceSocket.send(this.#announcePacket, ANNOUNCE_PORT, device.ip.address);
-      // As a KUVO, also push the 0x40 status-port beacon to the device on 50002,
-      // mirroring how a real NXS-GW advertises its presence there.
-      if (this.#statusPacket && this.#statusSocket) {
-        this.#statusSocket.send(this.#statusPacket, STATUS_PORT, device.ip.address);
-      }
-    };
 
     this.#intervalHandle = setInterval(
       () => [...this.#deviceManager.devices.values()].forEach(announceToDevice),
@@ -295,8 +248,5 @@ export class Announcer {
 
     this.#vcdj.id = next; // network holds this by reference, so queries follow
     this.#announcePacket = makeAnnouncePacket(this.#vcdj);
-    if (this.#statusPacket) {
-      this.#statusPacket = makeKuvoStatusPacket(this.#vcdj);
-    }
   };
 }

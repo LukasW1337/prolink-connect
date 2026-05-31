@@ -269,14 +269,8 @@ export class ProlinkNetwork {
     // the old hardcoded name no longer works once we announce as a custom name.
     this.#deviceManager.setSelf(vcdj.ip.address);
 
-    // Start announcing. The status socket is passed so a KUVO virtual device
-    // also emits the 0x40 presence beacon on 50002, like a real NXS-GW.
-    const announcer = new Announcer(
-      vcdj,
-      this.#announceSocket,
-      this.deviceManager,
-      this.#statusSocket,
-    );
+    // Start announcing
+    const announcer = new Announcer(vcdj, this.#announceSocket, this.deviceManager);
     announcer.start();
 
     // Create remote and local databases
